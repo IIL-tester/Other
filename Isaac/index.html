@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>The Binding of Isaac</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background-color: #0b0b0b;
+      color: #eee;
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #loading-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 15px;
+      z-index: 10;
+      max-width: 90vw;
+    }
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid #222;
+      border-top-color: #00d2ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    #status-text {
+      font-size: 15px;
+      color: #aaa;
+      letter-spacing: 0.5px;
+      text-align: center;
+    }
+    #player-wrapper {
+      display: none;
+      width: 100%;
+      height: 100%;
+    }
+    ruffle-player {
+      width: 100%;
+      height: 100%;
+      outline: none;
+    }
+    #fullscreen-btn {
+      display: none;
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      background: rgba(20, 20, 20, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      backdrop-filter: blur(4px);
+      transition: opacity 0.2s, background 0.2s;
+      opacity: 0.4;
+      z-index: 100;
+    }
+    #fullscreen-btn:hover {
+      opacity: 1;
+      background: rgba(0, 210, 255, 0.8);
+      border-color: transparent;
+      color: #000;
+      font-weight: bold;
+    }
+  </style>
+
+  <!-- Global Ruffle Config for Save Data & Performance -->
+  <script>
+    window.RufflePlayer = window.RufflePlayer || {};
+    window.RufflePlayer.config = {
+      letterbox: "on",
+      backgroundColor: "#000000",
+      openUrlMode: "confirm",
+      allowScriptAccess: true,
+      autoplay: "on",
+      unmuteOverlay: "hidden",
+      // Enables persistent Flash SharedObject storage across reloads
+      upgradeToHttps: true,
+      contextMenu: "off"
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@ruffle-rs/ruffle/ruffle.js"></script>
+</head>
+<body>
+
+  <div id="game-container">
+    <div id="loading-container">
+      <div class="spinner" id="spinner"></div>
+      <div id="status-text">Connecting to CDN...</div>
+    </div>
+
+    <div id="player-wrapper"></div>
+    <button id="fullscreen-btn" title="Toggle Fullscreen">⛶ Fullscreen</button>
+  </div>
+
+  <script>
+    const CDN_BASE = "https://cdn.jsdelivr.net/gh/IIL-tester/Other@main/Isaac/";
+    const PARTS = [
+      "Isaac.swf.part_00",
+      "Isaac.swf.part_01",
+      "Isaac.swf.part_02"
+    ];
+
+    const gameContainer = document.getElementById("game-container");
+    const loadingContainer = document.getElementById("loading-container");
+    const playerWrapper = document.getElementById("player-wrapper");
+    const statusText = document.getElementById("status-text");
+    const spinner = document.getElementById("spinner");
+    const fullscreenBtn = document.getElementById("fullscreen-btn");
+
+    // Fullscreen Toggle
+    fullscreenBtn.addEventListener("click", () => {
+      if (!document.fullscreenElement) {
+        gameContainer.requestFullscreen().catch(err => console.warn(err));
+      } else {
+        document.exitFullscreen();
+      }
+    });
+
+    // Auto-Focus & Audio Unlock
+    function wakeEngine() {
+      const player = document.querySelector("ruffle-player");
+      if (player) player.focus();
+    }
+    window.addEventListener("click", wakeEngine);
+    window.addEventListener("keydown", wakeEngine);
+
+    async function launchGame() {
+      try {
+        // 1. Download chunks
+        const buffers = [];
+        let totalSize = 0;
+
+        for (let i = 0; i < PARTS.length; i++) {
+          statusText.innerText = `Downloading game part ${i + 1} of ${PARTS.length}...`;
+          const res = await fetch(CDN_BASE + PARTS[i]);
+          if (!res.ok) throw new Error(`HTTP ${res.status} loading ${PARTS[i]}`);
+          const buffer = await res.arrayBuffer();
+          buffers.push(new Uint8Array(buffer));
+          totalSize += buffer.byteLength;
+        }
+
+        // 2. Stitch the chunks into one complete Uint8Array
+        statusText.innerText = `Stitching SWF binary (${(totalSize / (1024 * 1024)).toFixed(1)} MB)...`;
+        const combined = new Uint8Array(totalSize);
+        let offset = 0;
+        for (const chunk of buffers) {
+          combined.set(chunk, offset);
+          offset += chunk.byteLength;
+        }
+
+        // 3. Mount Ruffle Player
+        statusText.innerText = "Launching Isaac...";
+        
+        let player;
+        if (window.RufflePlayer && typeof window.RufflePlayer.newest === "function") {
+          player = window.RufflePlayer.newest().createPlayer();
+        } else {
+          player = document.createElement("ruffle-player");
+        }
+
+        playerWrapper.appendChild(player);
+        loadingContainer.style.display = "none";
+        playerWrapper.style.display = "block";
+        fullscreenBtn.style.display = "block";
+
+        // 4. Load binary and give focus
+        await player.load({
+          data: combined
+        });
+
+        player.focus();
+
+      } catch (err) {
+        if (spinner) spinner.style.display = "none";
+        statusText.style.color = "#ff5555";
+        statusText.innerText = "Error: " + err.message;
+        console.error(err);
+      }
+    }
+
+    window.addEventListener("DOMContentLoaded", launchGame);
+  </script>
+</body>
+</html>
